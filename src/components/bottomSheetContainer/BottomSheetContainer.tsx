@@ -20,6 +20,7 @@ function BottomSheetContainerComponent({
     () => [
       styles.container,
       {
+        zIndex: 25,
         top: topInset,
         bottom: bottomInset,
         overflow: detached ? 'visible' : 'hidden',
