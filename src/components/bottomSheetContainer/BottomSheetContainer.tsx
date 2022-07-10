@@ -1,5 +1,11 @@
 import React, { memo, useCallback, useMemo, useRef } from 'react';
-import { LayoutChangeEvent, StatusBar, View, ViewStyle } from 'react-native';
+import {
+  LayoutChangeEvent,
+  StatusBar,
+  StyleProp,
+  View,
+  ViewStyle,
+} from 'react-native';
 import { WINDOW_HEIGHT } from '../../constants';
 import { print } from '../../utilities';
 import { styles } from './styles';
@@ -12,12 +18,14 @@ function BottomSheetContainerComponent({
   bottomInset = 0,
   shouldCalculateHeight = true,
   detached,
+  style,
   children,
 }: BottomSheetContainerProps) {
   const containerRef = useRef<View>(null);
   //#region styles
-  const containerStyle = useMemo<ViewStyle[]>(
+  const containerStyle = useMemo<StyleProp<ViewStyle>>(
     () => [
+      style,
       styles.container,
       {
         zIndex: 25,
@@ -26,7 +34,7 @@ function BottomSheetContainerComponent({
         overflow: detached ? 'visible' : 'hidden',
       },
     ],
-    [detached, topInset, bottomInset]
+    [style, detached, topInset, bottomInset]
   );
   //#endregion
 
@@ -37,9 +45,7 @@ function BottomSheetContainerComponent({
         layout: { height },
       },
     }: LayoutChangeEvent) {
-      if (height !== containerHeight.value) {
-        containerHeight.value = height;
-      }
+      containerHeight.value = height;
 
       containerRef.current?.measure(
         (_x, _y, _width, _height, _pageX, pageY) => {

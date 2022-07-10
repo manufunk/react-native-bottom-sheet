@@ -19,6 +19,8 @@ import Animated, {
   runOnUI,
   cancelAnimation,
   useWorkletCallback,
+  WithSpringConfig,
+  WithTimingConfig,
 } from 'react-native-reanimated';
 import { State } from 'react-native-gesture-handler';
 import {
@@ -105,6 +107,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
 
       // styles
       style: _providedStyle,
+      containerStyle: _providedContainerStyle,
       backgroundStyle: _providedBackgroundStyle,
       handleStyle: _providedHandleStyle,
       handleIndicatorStyle: _providedHandleIndicatorStyle,
@@ -151,7 +154,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
       backdropComponent,
       backgroundComponent,
       footerComponent,
-      children,
+      children: Content,
     } = props;
     //#endregion
 
@@ -288,30 +291,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
       animationEasing: keyboardAnimationEasing,
       shouldHandleKeyboardEvents,
     } = useKeyboard();
-    /**
-     * Returns keyboard height that in the root container.
-     */
-    const getKeyboardHeightInContainer = useWorkletCallback(() => {
-      /**
-       * if android software input mode is not `adjustPan`, than keyboard
-       * height will be 0 all the time.
-       */
-      if (
-        Platform.OS === 'android' &&
-        android_keyboardInputMode === KEYBOARD_INPUT_MODE.adjustResize
-      ) {
-        return 0;
-      }
-
-      return $modal
-        ? Math.abs(
-            animatedKeyboardHeight.value -
-              Math.abs(bottomInset - animatedContainerOffset.value.bottom)
-          )
-        : Math.abs(
-            animatedKeyboardHeight.value - animatedContainerOffset.value.bottom
-          );
-    }, [$modal, bottomInset]);
+    const animatedKeyboardHeightInContainer = useSharedValue(0);
     //#endregion
 
     //#region state/dynamic variables
@@ -333,7 +313,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
 
       // extended position with keyboard =
       // container height - (sheet height + keyboard height in root container)
-      const keyboardHeightInContainer = getKeyboardHeightInContainer();
+      const keyboardHeightInContainer = animatedKeyboardHeightInContainer.value;
       const extendedPositionWithKeyboard = Math.max(
         0,
         animatedContainerHeight.value -
@@ -360,7 +340,15 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
       }
 
       return SHEET_STATE.OPENED;
-    }, [keyboardBehavior]);
+    }, [
+      animatedClosedPosition,
+      animatedContainerHeight,
+      animatedKeyboardHeightInContainer,
+      animatedPosition,
+      animatedSheetHeight,
+      isInTemporaryPosition,
+      keyboardBehavior,
+    ]);
     const animatedScrollableState = useDerivedValue(() => {
       /**
        * if scrollable override state is set, then we just return its value.
@@ -400,7 +388,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
     });
     // dynamic
     const animatedContentHeight = useDerivedValue(() => {
-      const keyboardHeightInContainer = getKeyboardHeightInContainer();
+      const keyboardHeightInContainer = animatedKeyboardHeightInContainer.value;
       const handleHeight = Math.max(0, animatedHandleHeight.value);
       let contentHeight = animatedSheetHeight.value - handleHeight;
 
@@ -455,7 +443,15 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
        * @link (https://github.com/gorhom/react-native-bottom-sheet/issues/470)
        */
       return Math.max(contentHeight, 0);
-    }, [keyboardBehavior]);
+    }, [
+      animatedContainerHeight,
+      animatedHandleHeight,
+      animatedKeyboardHeightInContainer,
+      animatedKeyboardState,
+      animatedSheetHeight,
+      isInTemporaryPosition,
+      keyboardBehavior,
+    ]);
     const animatedIndex = useDerivedValue(() => {
       const adjustedSnapPoints = animatedSnapPoints.value.slice().reverse();
       const adjustedSnapPointsIndexes = animatedSnapPoints.value
@@ -561,7 +557,8 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
           keyboardState === KEYBOARD_STATE.SHOWN
         ) {
           isInTemporaryPosition.value = true;
-          const keyboardHeightInContainer = getKeyboardHeightInContainer();
+          const keyboardHeightInContainer =
+            animatedKeyboardHeightInContainer.value;
           return Math.max(0, highestSnapPoint - keyboardHeightInContainer);
         }
 
@@ -571,7 +568,19 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
 
         return snapPoints[currentIndex];
       },
-      [keyboardBehavior, keyboardBlurBehavior]
+      [
+        animatedContentGestureState,
+        animatedCurrentIndex,
+        animatedHandleGestureState,
+        animatedHighestSnapPoint,
+        animatedKeyboardHeightInContainer,
+        animatedKeyboardState,
+        animatedPosition,
+        animatedSnapPoints,
+        isInTemporaryPosition,
+        keyboardBehavior,
+        keyboardBlurBehavior,
+      ]
     );
     const handleOnChange = useCallback(
       function handleOnChange(index: number) {
@@ -624,7 +633,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
       animatedAnimationState.value = ANIMATION_STATE.STOPPED;
     }, [animatedPosition, animatedAnimationState, animatedAnimationSource]);
     const animateToPositionCompleted = useWorkletCallback(
-      function animateToPositionCompleted(isFinished: boolean) {
+      function animateToPositionCompleted(isFinished?: boolean) {
         isForcedClosing.value = false;
 
         if (!isFinished) {
@@ -651,7 +660,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
         position: number,
         source: ANIMATION_SOURCE,
         velocity: number = 0,
-        configs?: Animated.WithTimingConfig | Animated.WithSpringConfig
+        configs?: WithTimingConfig | WithSpringConfig
       ) {
         if (
           position === animatedPosition.value ||
@@ -722,7 +731,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
     const handleSnapToIndex = useCallback(
       function handleSnapToIndex(
         index: number,
-        animationConfigs?: Animated.WithSpringConfig | Animated.WithTimingConfig
+        animationConfigs?: WithSpringConfig | WithTimingConfig
       ) {
         const snapPoints = animatedSnapPoints.value;
         invariant(
@@ -781,7 +790,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
     const handleSnapToPosition = useWorkletCallback(
       function handleSnapToPosition(
         position: number | string,
-        animationConfigs?: Animated.WithSpringConfig | Animated.WithTimingConfig
+        animationConfigs?: WithSpringConfig | WithTimingConfig
       ) {
         print({
           component: BottomSheet.name,
@@ -839,7 +848,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
     );
     const handleClose = useCallback(
       function handleClose(
-        animationConfigs?: Animated.WithSpringConfig | Animated.WithTimingConfig
+        animationConfigs?: WithSpringConfig | WithTimingConfig
       ) {
         print({
           component: BottomSheet.name,
@@ -885,7 +894,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
     );
     const handleForceClose = useCallback(
       function handleForceClose(
-        animationConfigs?: Animated.WithSpringConfig | Animated.WithTimingConfig
+        animationConfigs?: WithSpringConfig | WithTimingConfig
       ) {
         print({
           component: BottomSheet.name,
@@ -933,7 +942,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
     );
     const handleExpand = useCallback(
       function handleExpand(
-        animationConfigs?: Animated.WithSpringConfig | Animated.WithTimingConfig
+        animationConfigs?: WithSpringConfig | WithTimingConfig
       ) {
         print({
           component: BottomSheet.name,
@@ -982,7 +991,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
     );
     const handleCollapse = useCallback(
       function handleCollapse(
-        animationConfigs?: Animated.WithSpringConfig | Animated.WithTimingConfig
+        animationConfigs?: WithSpringConfig | WithTimingConfig
       ) {
         print({
           component: BottomSheet.name,
@@ -1061,6 +1070,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
         animatedHandleHeight,
         animatedFooterHeight,
         animatedKeyboardHeight,
+        animatedKeyboardHeightInContainer,
         animatedContainerHeight,
         animatedSnapPoints,
         animatedHighestSnapPoint,
@@ -1077,7 +1087,6 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
         failOffsetY: _providedFailOffsetY,
         animateToPosition,
         stopAnimation,
-        getKeyboardHeightInContainer,
         setScrollableRef,
         removeScrollableRef,
       }),
@@ -1095,6 +1104,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
         animatedAnimationState,
         animatedKeyboardState,
         animatedKeyboardHeight,
+        animatedKeyboardHeightInContainer,
         animatedSheetState,
         animatedHighestSnapPoint,
         animatedScrollableState,
@@ -1115,7 +1125,6 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
         _providedActiveOffsetY,
         _providedFailOffsetX,
         _providedFailOffsetY,
-        getKeyboardHeightInContainer,
         setScrollableRef,
         removeScrollableRef,
         animateToPosition,
@@ -1347,6 +1356,16 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
         const _previousKeyboardState = _previousResult?._keyboardState;
         const _previousKeyboardHeight = _previousResult?._keyboardHeight;
 
+        /**
+         * Calculate the keyboard height in the container.
+         */
+        animatedKeyboardHeightInContainer.value = $modal
+          ? Math.abs(
+              _keyboardHeight -
+                Math.abs(bottomInset - animatedContainerOffset.value.bottom)
+            )
+          : Math.abs(_keyboardHeight - animatedContainerOffset.value.bottom);
+
         const hasActiveGesture =
           animatedContentGestureState.value === State.ACTIVE ||
           animatedContentGestureState.value === State.BEGAN ||
@@ -1379,6 +1398,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
             keyboardBehavior === KEYBOARD_BEHAVIOR.interactive &&
             android_keyboardInputMode === KEYBOARD_INPUT_MODE.adjustResize)
         ) {
+          animatedKeyboardHeightInContainer.value = 0;
           return;
         }
 
@@ -1404,9 +1424,12 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
         );
       },
       [
+        $modal,
+        bottomInset,
         keyboardBehavior,
         keyboardBlurBehavior,
         android_keyboardInputMode,
+        animatedContainerOffset,
         getNextPosition,
       ]
     );
@@ -1567,6 +1590,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
               topInset={topInset}
               bottomInset={bottomInset}
               detached={detached}
+              style={_providedContainerStyle}
             >
               <Animated.View style={containerStyle}>
                 <BottomSheetBackgroundContainer
@@ -1584,9 +1608,7 @@ const BottomSheetComponent = forwardRef<BottomSheet, BottomSheetProps>(
                     key="BottomSheetRootDraggableView"
                     style={contentContainerStyle}
                   >
-                    {typeof children === 'function'
-                      ? (children as Function)()
-                      : children}
+                    {typeof Content === 'function' ? <Content /> : Content}
 
                     {footerComponent && (
                       <BottomSheetFooterContainer
