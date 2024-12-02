@@ -1,22 +1,30 @@
-import React, { memo, useCallback, useMemo, useRef } from 'react';
+import React, {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import type { ViewProps } from 'react-native';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
   interpolate,
-  Extrapolate,
   useAnimatedStyle,
   useAnimatedReaction,
-  useAnimatedGestureHandler,
   runOnJS,
+  Extrapolation,
 } from 'react-native-reanimated';
-import {
-  TapGestureHandler,
-  TapGestureHandlerGestureEvent,
-} from 'react-native-gesture-handler';
 import { useBottomSheet } from '../../hooks';
 import {
-  DEFAULT_OPACITY,
+  DEFAULT_ACCESSIBILITY_HINT,
+  DEFAULT_ACCESSIBILITY_LABEL,
+  DEFAULT_ACCESSIBILITY_ROLE,
+  DEFAULT_ACCESSIBLE,
   DEFAULT_APPEARS_ON_INDEX,
   DEFAULT_DISAPPEARS_ON_INDEX,
   DEFAULT_ENABLE_TOUCH_THROUGH,
+  DEFAULT_OPACITY,
   DEFAULT_PRESS_BEHAVIOR,
 } from './constants';
 import { styles } from './styles';
@@ -29,11 +37,17 @@ const BottomSheetBackdropComponent = ({
   disappearsOnIndex: _providedDisappearsOnIndex,
   enableTouchThrough: _providedEnableTouchThrough,
   pressBehavior = DEFAULT_PRESS_BEHAVIOR,
+  onPress,
   style,
   children,
+  accessible: _providedAccessible = DEFAULT_ACCESSIBLE,
+  accessibilityRole: _providedAccessibilityRole = DEFAULT_ACCESSIBILITY_ROLE,
+  accessibilityLabel: _providedAccessibilityLabel = DEFAULT_ACCESSIBILITY_LABEL,
+  accessibilityHint: _providedAccessibilityHint = DEFAULT_ACCESSIBILITY_HINT,
 }: BottomSheetDefaultBackdropProps) => {
   //#region hooks
   const { snapToIndex, close } = useBottomSheet();
+  const isMounted = useRef(false);
   //#endregion
 
   //#region defaults
@@ -46,12 +60,15 @@ const BottomSheetBackdropComponent = ({
   //#endregion
 
   //#region variables
-  const containerRef = useRef<Animated.View>(null);
-  const pointerEvents = enableTouchThrough ? 'none' : 'auto';
+  const [pointerEvents, setPointerEvents] = useState<
+    ViewProps['pointerEvents']
+  >(enableTouchThrough ? 'none' : 'auto');
   //#endregion
 
   //#region callbacks
   const handleOnPress = useCallback(() => {
+    onPress?.();
+
     if (pressBehavior === 'close') {
       close();
     } else if (pressBehavior === 'collapse') {
@@ -59,43 +76,38 @@ const BottomSheetBackdropComponent = ({
     } else if (typeof pressBehavior === 'number') {
       snapToIndex(pressBehavior);
     }
-  }, [snapToIndex, close, disappearsOnIndex, pressBehavior]);
+  }, [snapToIndex, close, disappearsOnIndex, pressBehavior, onPress]);
   const handleContainerTouchability = useCallback(
     (shouldDisableTouchability: boolean) => {
-      if (!containerRef.current) {
-        return;
-      }
-      // @ts-ignore
-      containerRef.current.setNativeProps({
-        pointerEvents: shouldDisableTouchability ? 'none' : 'auto',
-      });
+      isMounted.current &&
+        setPointerEvents(shouldDisableTouchability ? 'none' : 'auto');
     },
     []
   );
   //#endregion
 
   //#region tap gesture
-  const gestureHandler =
-    useAnimatedGestureHandler<TapGestureHandlerGestureEvent>(
-      {
-        onFinish: () => {
-          runOnJS(handleOnPress)();
-        },
-      },
-      [handleOnPress]
-    );
+  const tapHandler = useMemo(() => {
+    const gesture = Gesture.Tap().onEnd(() => {
+      runOnJS(handleOnPress)();
+    });
+    return gesture;
+  }, [handleOnPress]);
   //#endregion
 
   //#region styles
-  const containerAnimatedStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(
-      animatedIndex.value,
-      [-1, disappearsOnIndex, appearsOnIndex],
-      [0, 0, opacity],
-      Extrapolate.CLAMP
-    ),
-    flex: 1,
-  }));
+  const containerAnimatedStyle = useAnimatedStyle(
+    () => ({
+      opacity: interpolate(
+        animatedIndex.value,
+        [-1, disappearsOnIndex, appearsOnIndex],
+        [0, 0, opacity],
+        Extrapolation.CLAMP
+      ),
+      flex: 1,
+    }),
+    [animatedIndex, appearsOnIndex, disappearsOnIndex, opacity]
+  );
   const containerStyle = useMemo(
     () => [styles.container, style, containerAnimatedStyle],
     [style, containerAnimatedStyle]
@@ -113,31 +125,40 @@ const BottomSheetBackdropComponent = ({
     },
     [disappearsOnIndex]
   );
+
+  // addressing updating the state after unmounting.
+  // [link](https://github.com/gorhom/react-native-bottom-sheet/issues/1376)
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
   //#endregion
 
-  return pressBehavior !== 'none' ? (
-    <TapGestureHandler onGestureEvent={gestureHandler}>
-      <Animated.View
-        ref={containerRef}
-        style={containerStyle}
-        accessible={true}
-        accessibilityRole="button"
-        accessibilityLabel="Bottom Sheet backdrop"
-        accessibilityHint={`Tap to ${
-          typeof pressBehavior === 'string' ? pressBehavior : 'move'
-        } the Bottom Sheet`}
-      >
-        {children}
-      </Animated.View>
-    </TapGestureHandler>
-  ) : (
+  const AnimatedView = (
     <Animated.View
-      ref={containerRef}
-      pointerEvents={pointerEvents}
       style={containerStyle}
+      pointerEvents={pointerEvents}
+      accessible={_providedAccessible ?? undefined}
+      accessibilityRole={_providedAccessibilityRole ?? undefined}
+      accessibilityLabel={_providedAccessibilityLabel ?? undefined}
+      accessibilityHint={
+        _providedAccessibilityHint
+          ? _providedAccessibilityHint
+          : `Tap to ${
+              typeof pressBehavior === 'string' ? pressBehavior : 'move'
+            } the Bottom Sheet`
+      }
     >
       {children}
     </Animated.View>
+  );
+
+  return pressBehavior !== 'none' ? (
+    <GestureDetector gesture={tapHandler}>{AnimatedView}</GestureDetector>
+  ) : (
+    AnimatedView
   );
 };
 
